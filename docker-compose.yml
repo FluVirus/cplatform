@@ -65,6 +65,20 @@ services:
     depends_on:
       - redis
 
+  apiserver:
+    build:
+      context: ./apiserver
+      args:
+        TARGETARCH: amd64
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: /devenv/apiserver/apiserver.env
+    depends_on:
+      pgsql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   pgsql_volume:
