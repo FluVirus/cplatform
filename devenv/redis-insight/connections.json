@@ -1,0 +1,12 @@
+[
+  {
+    "id": "1",
+    "name": "The Redis",
+    "connectionType": "STANDALONE",
+    "host": "redis",
+    "port": 6379,
+    "tls": false,
+    "username": "insight",
+    "password": "5555"
+  }
+]

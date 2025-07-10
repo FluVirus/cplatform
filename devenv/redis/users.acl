@@ -1,0 +1,3 @@
+user default off
+user insight on +@all allkeys >5555
+user apiserver on +@all allkeys >1111

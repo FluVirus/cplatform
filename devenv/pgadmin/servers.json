@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "0": {
+      "Name": "Api Server DB",
+      "Group": "Servers",
+      "Port": 5432,
+      "Username": "postgres",
+      "Host": "pgsql",
+      "SSLMode": "prefer",
+      "MaintenanceDB": "cplatformdb",
+      "PassFile":"/.pgpass"
+    }
+  }
+}

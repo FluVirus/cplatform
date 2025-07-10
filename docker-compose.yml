@@ -1,0 +1,72 @@
+services:
+  pgsql:
+    image: postgres:17.4-alpine
+    env_file:
+      - devenv/pgsql/pgsql.env
+    restart: on-failure
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgsql_volume:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
+      interval: 4s
+      timeout: 2s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:9.4.0
+    user: "root"
+    env_file:
+      - devenv/pgadmin/pgadmin.env
+    restart: on-failure
+    ports:
+      - "8081:80"
+    volumes:
+      - ./pgsql/schema.pgerd:/var/lib/pgadmin/storage/a_a.com/schema.pgerd
+      - ./devenv/pgadmin/.pgpass:/var/lib/pgadmin/.pgpass
+      - ./devenv/pgadmin/servers.json:/pgadmin4/servers.json
+    depends_on:
+      pgsql:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      cd /var/lib/pgadmin/storage/a_a.com && 
+      cp /var/lib/pgadmin/.pgpass .pgpass &&
+      chmod 600 .pgpass;
+      /entrypoint.sh
+      "
+
+  redis:
+      image: redis:8.0.3-alpine
+      restart: on-failure
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis_volume:/data
+        - ./devenv/redis:/usr/local/etc/redis
+      command: redis-server /usr/local/etc/redis/redis.conf
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 4s
+        timeout: 2s
+        retries: 10
+
+  redis-insight:
+    image: redis/redisinsight:2.70.0
+    restart: on-failure
+    env_file:
+      - ./devenv/redis-insight/redis-insight.env
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis_insight_volume:/data
+      - ./devenv/redis-insight/connections.json:/var/redis-insight/connections.json
+    depends_on:
+      - redis
+
+
+volumes:
+  pgsql_volume:
+  redis_volume:
+  redis_insight_volume:
