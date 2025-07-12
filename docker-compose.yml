@@ -8,6 +8,7 @@ services:
       - "5432:5432"
     volumes:
       - pgsql_volume:/var/lib/postgresql/data
+      - ./pgsql/scripts:/docker-entrypoint-initdb.d
     healthcheck:
       test: pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
       interval: 4s
@@ -24,6 +25,7 @@ services:
       - "8081:80"
     volumes:
       - ./pgsql/schema.pgerd:/var/lib/pgadmin/storage/a_a.com/schema.pgerd
+      - ./pgsql/scripts/cplatformdb.sql:/var/lib/pgadmin/storage/a_a.com/cplatformdb.sql
       - ./devenv/pgadmin/.pgpass:/var/lib/pgadmin/.pgpass
       - ./devenv/pgadmin/servers.json:/pgadmin4/servers.json
     depends_on:
