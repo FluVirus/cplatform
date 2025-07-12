@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 )
 
 type Configuration struct {
@@ -41,10 +42,11 @@ func ReadConfigurationFromEnv() (Configuration, error) {
 	}
 
 	logLevelStr := os.Getenv("APISERVER_LOG_LEVEL")
+	logLevelStr = strings.ToLower(logLevelStr)
 
 	logLevel, ok := strToSlog[logLevelStr]
 	if !ok {
-		errs = append(errs, fmt.Errorf("%w: %q level is not recognized", ErrLoggingLevelInvalid, logLevelStr))
+		errs = append(errs, fmt.Errorf("%w: %q level is not recognized; valid are: debug, info, warn, error; default is info", ErrLoggingLevelInvalid, logLevelStr))
 	}
 
 	if len(errs) > 0 {
