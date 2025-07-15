@@ -5,11 +5,12 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.users
 (
-    id bigint NOT NULL,
+    id bigserial NOT NULL,
     name text NOT NULL,
     email text NOT NULL,
-    salt character(10) NOT NULL,
-    password_hash character(256) NOT NULL,
-    PRIMARY KEY (id)
+    salt bytea NOT NULL,
+    password_hash bytea NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT c_unique_user_email UNIQUE (email)
 );
 END;
