@@ -59,9 +59,8 @@ func (s *UserService) RegisterUser(ctx context.Context, name string, email strin
 
 		rollbackErr := s.uow.RollbackChanges(context.WithoutCancel(ctx))
 		err = errors.Join(err, rollbackErr)
-		
-		return fmt.Errorf("fail user registration: %w", err)
 
+		return fmt.Errorf("fail user registration: %w", err)
 	}
 
 	err = s.uow.SaveChanges(ctx)

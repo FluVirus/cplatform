@@ -2,23 +2,27 @@ package main
 
 import (
 	"context"
-	"cplatform/internal/configuration"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
+	"cplatform/cmd/server/configuration"
+	credis "cplatform/internal/infrastructure/cache/redis"
+	"cplatform/internal/infrastructure/persistence/postgres"
+	presentation "cplatform/internal/presentation/controller/http"
+	"cplatform/pkg/slogext"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
-	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	config, err := configuration.ReadConfigurationFromEnv()
 	if err != nil {
-		slog.Error("main: error reading configuration from env", "cause", err.Error())
+		slog.Error("main: error reading configuration from env", slogext.Cause(err))
 		os.Exit(2)
 	}
 
@@ -30,14 +34,14 @@ func main() {
 
 	redisOptions, err := redis.ParseURL(config.RedisUrl)
 	if err != nil {
-		logger.Error("main: wrong redis url", "cause", err.Error())
+		logger.Error("main: wrong redis url", slogext.Cause(err))
 		os.Exit(3)
 	}
 
 	redisClient := redis.NewClient(redisOptions)
 	defer func() {
 		if err := redisClient.Close(); err != nil {
-			logger.Error("main: error while closing redis client", "cause", err.Error())
+			logger.Error("main: error while closing redis client", slogext.Cause(err))
 		}
 	}()
 
@@ -46,7 +50,7 @@ func main() {
 
 	status := redisClient.Ping(redisCtx)
 	if err = status.Err(); err != nil {
-		logger.Error("main: cannot ping redis server", "cause", err.Error())
+		logger.Error("main: cannot ping redis server", slogext.Cause(err))
 		os.Exit(4)
 	}
 
@@ -55,7 +59,7 @@ func main() {
 
 	pgConnPool, err := pgxpool.New(pgCtx, config.PgsqlUrl)
 	if err != nil {
-		logger.Error("main: cannot create pgxpool", "cause", err.Error())
+		logger.Error("main: cannot create pgxpool", slogext.Cause(err))
 		os.Exit(5)
 	}
 	defer pgConnPool.Close()
@@ -65,11 +69,56 @@ func main() {
 
 	err = pgConnPool.Ping(pgPingCtx)
 	if err != nil {
-		logger.Error("main: cannot ping pgxpool", "cause", err.Error())
+		logger.Error("main: cannot ping pgxpool", slogext.Cause(err))
 		os.Exit(6)
 	}
 
 	logger.Info("main: successfully connected to services, staying online forever")
 
-	<-sigCtx.Done()
+	// creating services
+	redisCache := credis.NewRedisCache(redisClient, logger)
+	uowFactory := postgres.NewUnitOfWorkFactory(pgConnPool, logger)
+
+	controller := presentation.NewController(uowFactory, redisCache, logger)
+
+	router := presentation.NewRouter(controller)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+
+	serverChan := make(chan error)
+	server := http.Server{
+		Addr:         ":80",
+		Handler:      router.GetHandler(),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		defer close(serverChan)
+
+		msg := fmt.Sprintf("server starts at addr %s", server.Addr)
+		logger.Info(msg)
+		err := server.ListenAndServe()
+		if err != nil {
+			serverChan <- err
+		}
+	}()
+
+	select {
+	case sig := <-sigChan:
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+
+		err := server.Shutdown(shutdownCtx)
+		if err != nil {
+			logger.Error("main: cannot shutdown server gracefully", slogext.Signal(sig), slogext.Cause(err))
+			os.Exit(32)
+		} else {
+			logger.Info("main: server shutdown gracefully", slogext.Signal(sig))
+		}
+	case err := <-serverChan:
+		logger.Error("main: server error", slogext.Cause(err))
+		os.Exit(33)
+	}
 }
