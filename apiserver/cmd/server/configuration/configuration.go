@@ -28,7 +28,7 @@ var strToSlog = map[string]slog.Level{
 	"error": slog.LevelError,
 }
 
-func ReadConfigurationFromEnv() (Configuration, error) {
+func ReadConfigurationFromEnv() (*Configuration, error) {
 	errs := make([]error, 0)
 
 	redisUrl := os.Getenv("APISERVER_REDIS_URL")
@@ -50,10 +50,10 @@ func ReadConfigurationFromEnv() (Configuration, error) {
 	}
 
 	if len(errs) > 0 {
-		return Configuration{}, errors.Join(errs...)
+		return nil, errors.Join(errs...)
 	}
 
-	configuration := Configuration{
+	configuration := &Configuration{
 		RedisUrl:  redisUrl,
 		PgsqlUrl:  pgsqlUrl,
 		SlogLevel: logLevel,

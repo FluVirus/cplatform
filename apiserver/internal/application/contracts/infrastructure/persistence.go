@@ -1,9 +1,10 @@
-package contracts
+package infrastructure
 
 import (
 	"context"
 	"cplatform/internal/domain"
 	"errors"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -19,15 +20,15 @@ type UserRepository interface {
 }
 
 type UnitOfWork interface {
-	UserRepository() UserRepository
+	UserRepository(ctx context.Context) UserRepository
 	SaveChanges(ctx context.Context) error
 	RollbackChanges(ctx context.Context) error
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type UnitOfWorkFactory interface {
-	Create(ctx context.Context) (UnitOfWork, error)
+	Create(ctx context.Context) UnitOfWork
 
 	// CreateWithIsolationLevel has the note: txIsolationLevel is tradeoff not to write huge isolation level detection logic
-	CreateWithIsolationLevel(ctx context.Context, level pgx.TxIsoLevel) (UnitOfWork, error)
+	CreateWithIsolationLevel(ctx context.Context, level pgx.TxIsoLevel) UnitOfWork
 }

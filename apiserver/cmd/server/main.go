@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"cplatform/cmd/server/configuration"
+	"cplatform/internal/application/authentication/basic"
+	"cplatform/internal/di/middleware"
+	"cplatform/internal/di/scope"
 	credis "cplatform/internal/infrastructure/cache/redis"
 	"cplatform/internal/infrastructure/persistence/postgres"
-	presentation "cplatform/internal/presentation/controller/http"
+	controller_http "cplatform/internal/presentation/http/controller"
+	"cplatform/internal/presentation/http/pipeline"
 	"cplatform/pkg/slogext"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +20,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/cors"
 )
 
 func main() {
@@ -26,87 +30,79 @@ func main() {
 		os.Exit(2)
 	}
 
+	// LOGGER
 	handlerOptions := &slog.HandlerOptions{
 		Level: config.SlogLevel,
 	}
 	handler := slog.NewJSONHandler(os.Stdout, handlerOptions)
 	logger := slog.New(handler)
 
+	// REDIS
 	redisOptions, err := redis.ParseURL(config.RedisUrl)
 	if err != nil {
-		logger.Error("main: wrong redis url", slogext.Cause(err))
-		os.Exit(3)
+		logger.Error("main: fail parse redis url", slogext.Cause(err))
+		return
 	}
 
 	redisClient := redis.NewClient(redisOptions)
-	defer func() {
-		if err := redisClient.Close(); err != nil {
-			logger.Error("main: error while closing redis client", slogext.Cause(err))
-		}
-	}()
 
-	redisCtx, redisCancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer redisCancel()
-
-	status := redisClient.Ping(redisCtx)
-	if err = status.Err(); err != nil {
-		logger.Error("main: cannot ping redis server", slogext.Cause(err))
-		os.Exit(4)
-	}
-
-	pgCtx, pgCancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer pgCancel()
-
-	pgConnPool, err := pgxpool.New(pgCtx, config.PgsqlUrl)
+	// POSTGRES
+	pgConfig, err := pgxpool.ParseConfig(config.PgsqlUrl)
 	if err != nil {
-		logger.Error("main: cannot create pgxpool", slogext.Cause(err))
-		os.Exit(5)
+		logger.Error("main: fail parse pgsql url", slogext.Cause(err))
+		return
 	}
-	defer pgConnPool.Close()
 
-	pgPingCtx, pgPingCancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer pgPingCancel()
-
-	err = pgConnPool.Ping(pgPingCtx)
+	pgPool, err := pgxpool.NewWithConfig(context.Background(), pgConfig)
 	if err != nil {
-		logger.Error("main: cannot ping pgxpool", slogext.Cause(err))
-		os.Exit(6)
+		logger.Error("main: fail create pgxpool", slogext.Cause(err))
+		return
 	}
 
-	logger.Info("main: successfully connected to services, staying online forever")
-
-	// creating services
+	// INFRASTRUCTURE
+	uowFactory := postgres.NewUnitOfWorkFactory(pgPool, logger)
 	redisCache := credis.NewRedisCache(redisClient, logger)
-	uowFactory := postgres.NewUnitOfWorkFactory(pgConnPool, logger)
 
-	controller := presentation.NewController(uowFactory, redisCache, logger)
+	// SCOPES
+	scopeFactory := scope.NewFactory(uowFactory, redisCache, logger)
 
-	router := presentation.NewRouter(controller)
+	// API
+	corsMiddleware := cors.New(cors.Options{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"*"},
+		AllowedHeaders: []string{"*"},
+	})
+
+	recoverMiddleware := pipeline.NewRecoverMiddleware(logger)
+
+	isoLevelMiddleware := middleware.NewIsoLevelMiddleware(logger)
+	scopeMiddleware := middleware.NewScopeMiddleware(logger, scopeFactory)
+	basicAuthMiddleware := basic.NewBasicAuthMiddleware(logger)
+
+	controller := controller_http.NewController(logger)
+	router := controller_http.NewRouter(controller, isoLevelMiddleware, scopeMiddleware, basicAuthMiddleware, logger)
+	p := pipeline.NewPipeline(router, recoverMiddleware, corsMiddleware, logger)
+
+	// HTTP
+	server := http.Server{
+		Addr:         ":80",
+		Handler:      p.CreateHandler(),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	serverChan := make(chan error)
-	server := http.Server{
-		Addr:         ":80",
-		Handler:      router.GetHandler(),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
-	}
-
 	go func() {
-		defer close(serverChan)
-
-		msg := fmt.Sprintf("server starts at addr %s", server.Addr)
-		logger.Info(msg)
-		err := server.ListenAndServe()
-		if err != nil {
-			serverChan <- err
-		}
+		serverChan <- server.ListenAndServe()
 	}()
 
 	select {
 	case sig := <-sigChan:
+		logger.Info("main: start shutdown", slogext.Signal(sig))
+
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 

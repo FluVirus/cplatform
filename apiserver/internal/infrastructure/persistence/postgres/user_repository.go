@@ -2,12 +2,13 @@ package postgres
 
 import (
 	"context"
-	"cplatform/internal/application/contracts"
+	"cplatform/internal/application/contracts/infrastructure"
 	"cplatform/internal/domain"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"log/slog"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -17,18 +18,15 @@ type userRepository struct {
 	uow    *UnitOfWork
 }
 
-func newUserRepository(logger *slog.Logger) *userRepository {
+func newUserRepository(uow *UnitOfWork, logger *slog.Logger) *userRepository {
 	return &userRepository{
 		logger: logger,
+		uow:    uow,
 	}
 }
 
-func (repo *userRepository) setParentUnitOfWork(parent *UnitOfWork) {
-	repo.uow = parent
-}
-
 func (repo *userRepository) AddUser(ctx context.Context, user *domain.User) error {
-	tx, err := repo.uow.Tx()
+	tx, err := repo.uow.Tx(ctx)
 	if err != nil {
 		return fmt.Errorf("cannot fetch transaction: %w", err)
 	}
@@ -47,7 +45,7 @@ func (repo *userRepository) AddUser(ctx context.Context, user *domain.User) erro
 
 		if errors.As(err, &pgErr) {
 			if pgErr.ConstraintName == "c_unique_user_email" {
-				err = fmt.Errorf("%w: %s", contracts.ErrDuplicateEmail, err.Error())
+				err = fmt.Errorf("%w: %s", infrastructure.ErrDuplicateEmail, err.Error())
 			}
 
 			return fmt.Errorf("fail perform sql query: %w", err)
@@ -60,7 +58,7 @@ func (repo *userRepository) AddUser(ctx context.Context, user *domain.User) erro
 }
 
 func (repo *userRepository) DeleteUser(ctx context.Context, id domain.UserId) error {
-	tx, err := repo.uow.Tx()
+	tx, err := repo.uow.Tx(ctx)
 	if err != nil {
 		return fmt.Errorf("cannot fetch transaction: %w", err)
 	}
@@ -75,7 +73,7 @@ func (repo *userRepository) DeleteUser(ctx context.Context, id domain.UserId) er
 }
 
 func (repo *userRepository) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
-	tx, err := repo.uow.Tx()
+	tx, err := repo.uow.Tx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot fetch transaction: %w", err)
 	}
@@ -84,10 +82,10 @@ func (repo *userRepository) GetUserByEmail(ctx context.Context, email string) (*
 	err = tx.QueryRow(ctx,
 		"SELECT id, name, email, password_hash, salt FROM public.users WHERE email = $1",
 		email,
-	).Scan(&userDto)
+	).Scan(&userDto.Id, &userDto.Name, &userDto.Email, &userDto.PasswordHash, &userDto.Salt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("%w: no user with such email", contracts.ErrUserNotFound)
+		return nil, fmt.Errorf("%w: no user with such email", infrastructure.ErrUserNotFound)
 	}
 
 	if err != nil {
