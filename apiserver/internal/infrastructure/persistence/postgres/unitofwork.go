@@ -2,11 +2,12 @@ package postgres
 
 import (
 	"context"
-	"cplatform/internal/application/contracts"
-	"cplatform/pkg/slogext"
+	"cplatform/internal/application/contracts/infrastructure"
+	"fmt"
+	"log/slog"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"log/slog"
 )
 
 type UnitOfWork struct {
@@ -22,23 +23,18 @@ type UnitOfWork struct {
 }
 
 func newUnitOfWorkWithIsoLevel(conn *pgxpool.Conn, logger *slog.Logger, txIsoLevel pgx.TxIsoLevel) *UnitOfWork {
-	userRepo := newUserRepository(logger)
-
 	uow := &UnitOfWork{
-		conn:           conn,
-		logger:         logger,
-		txIsoLevel:     txIsoLevel,
-		userRepository: userRepo,
+		conn:       conn,
+		logger:     logger,
+		txIsoLevel: txIsoLevel,
 	}
-
-	userRepo.setParentUnitOfWork(uow)
 
 	return uow
 }
 
-func (uow *UnitOfWork) Tx() (pgx.Tx, error) {
+func (uow *UnitOfWork) Tx(ctx context.Context) (pgx.Tx, error) {
 	if !uow.hasCurrTx {
-		tx, err := uow.conn.BeginTx(context.TODO(), pgx.TxOptions{
+		tx, err := uow.conn.BeginTx(ctx, pgx.TxOptions{
 			IsoLevel: uow.txIsoLevel,
 		})
 
@@ -75,23 +71,28 @@ func (uow *UnitOfWork) RollbackChanges(ctx context.Context) error {
 	return err
 }
 
-func (uow *UnitOfWork) UserRepository() contracts.UserRepository {
+func (uow *UnitOfWork) UserRepository(context.Context) infrastructure.UserRepository {
+	if uow.userRepository == nil {
+		uow.userRepository = newUserRepository(uow, uow.logger)
+	}
+
 	return uow.userRepository
 }
 
-func (uow *UnitOfWork) Close() error {
-	if uow.hasCurrTx {
+func (uow *UnitOfWork) Close(ctx context.Context) error {
+	defer func() {
 		uow.hasCurrTx = false
-
-		err := uow.currTx.Rollback(context.Background())
-		if err != nil {
-			uow.logger.Warn("failed to rollback transaction in uow_close", slogext.Cause(err))
-		}
-
 		uow.currTx = nil
-	}
+		uow.conn.Release()
+	}()
 
-	uow.conn.Release()
+	if uow.hasCurrTx {
+		newCtx := context.WithoutCancel(ctx)
+		err := uow.currTx.Rollback(newCtx)
+		if err != nil {
+			return fmt.Errorf("failed to rollback transaction in uow_close: %w", err)
+		}
+	}
 
 	return nil
 }

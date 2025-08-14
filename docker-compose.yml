@@ -2,7 +2,7 @@ services:
   pgsql:
     image: postgres:17.4-alpine
     env_file:
-      - devenv/pgsql/pgsql.env
+      - ./devenv/pgsql/pgsql.env
     restart: on-failure
     ports:
       - "5432:5432"
@@ -19,7 +19,7 @@ services:
     image: dpage/pgadmin4:9.4.0
     user: "root"
     env_file:
-      - devenv/pgadmin/pgadmin.env
+      - ./devenv/pgadmin/pgadmin.env
     restart: on-failure
     ports:
       - "8081:80"
@@ -80,7 +80,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    env_file: /devenv/apiserver/apiserver.env
+    env_file: ./devenv/apiserver/apiserver.env
     depends_on:
       pgsql:
         condition: service_healthy

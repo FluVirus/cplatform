@@ -3,35 +3,31 @@ package users
 import (
 	"bytes"
 	"context"
-	"cplatform/internal/application/contracts"
+	"cplatform/internal/application/contracts/application"
+	"cplatform/internal/application/contracts/infrastructure"
 	"cplatform/internal/domain"
 	"cplatform/pkg/slogext"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/argon2"
 	"log/slog"
 	"math/rand/v2"
-)
 
-var (
-	ErrDuplicateEmail   = errors.New("email already exists")
-	ErrUserNotFound     = errors.New("user not found")
-	ErrWrongCredentials = errors.New("wrong credentials")
+	"golang.org/x/crypto/argon2"
 )
 
 type UserService struct {
-	uow        contracts.UnitOfWork
-	cache      contracts.Cache
+	uow        infrastructure.UnitOfWork
+	cache      infrastructure.Cache
 	logger     *slog.Logger
 	saltLength int
 }
 
-func NewUserService(uow contracts.UnitOfWork, cache contracts.Cache, logger *slog.Logger, saltLength int) *UserService {
+func NewUserService(uow infrastructure.UnitOfWork, cache infrastructure.Cache, logger *slog.Logger) *UserService {
 	return &UserService{
 		uow:        uow,
 		cache:      cache,
 		logger:     logger,
-		saltLength: saltLength,
+		saltLength: 10,
 	}
 }
 
@@ -50,22 +46,17 @@ func (s *UserService) RegisterUser(ctx context.Context, name string, email strin
 		PasswordHash: hash,
 	}
 
-	err := s.uow.UserRepository().AddUser(ctx, user)
+	err := s.uow.UserRepository(ctx).AddUser(ctx, user)
 
 	if err != nil {
-		if errors.Is(err, contracts.ErrDuplicateEmail) {
-			err = fmt.Errorf("%w: %s", ErrDuplicateEmail, err.Error())
+		if errors.Is(err, infrastructure.ErrDuplicateEmail) {
+			err = fmt.Errorf("%w: %s", application.ErrDuplicateEmail, err.Error())
 		}
 
 		rollbackErr := s.uow.RollbackChanges(context.WithoutCancel(ctx))
 		err = errors.Join(err, rollbackErr)
 
 		return fmt.Errorf("fail user registration: %w", err)
-	}
-
-	err = s.uow.SaveChanges(ctx)
-	if err != nil {
-		return fmt.Errorf("fail saving changes: %w", err)
 	}
 
 	return nil
@@ -80,11 +71,11 @@ func (s *UserService) GetUserWithCheckCredentials(ctx context.Context, email, pa
 			s.logger.Warn("error during fetching user from redis", slogext.Cause(err))
 		}
 
-		user, err = s.uow.UserRepository().GetUserByEmail(ctx, email)
+		user, err = s.uow.UserRepository(ctx).GetUserByEmail(ctx, email)
 
 		if err != nil {
-			if errors.Is(err, contracts.ErrUserNotFound) {
-				err = fmt.Errorf("%w: %s", ErrUserNotFound, err.Error())
+			if errors.Is(err, infrastructure.ErrUserNotFound) {
+				err = fmt.Errorf("%w: %s", application.ErrUserNotFound, err.Error())
 			}
 
 			return nil, fmt.Errorf("fail get user: %w", err)
@@ -99,7 +90,7 @@ func (s *UserService) GetUserWithCheckCredentials(ctx context.Context, email, pa
 	hash := hashFunc([]byte(password), user.Salt)
 
 	if !bytes.Equal(user.PasswordHash, hash) {
-		return nil, ErrWrongCredentials
+		return nil, application.ErrWrongCredentials
 	}
 
 	return user, nil

@@ -2,36 +2,38 @@ package postgres
 
 import (
 	"context"
-	"cplatform/internal/application/contracts"
+	"cplatform/internal/application/contracts/infrastructure"
 	"fmt"
+	"log/slog"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"log/slog"
 )
 
 var defaultIsoLevel = pgx.ReadCommitted
 
-type Factory struct {
+type UnitOfWorkFactory struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
 }
 
-func NewUnitOfWorkFactory(pool *pgxpool.Pool, logger *slog.Logger) *Factory {
-	return &Factory{
+func NewUnitOfWorkFactory(pool *pgxpool.Pool, logger *slog.Logger) *UnitOfWorkFactory {
+	return &UnitOfWorkFactory{
 		pool:   pool,
 		logger: logger,
 	}
 }
 
-func (f *Factory) Create(ctx context.Context) (contracts.UnitOfWork, error) {
+func (f *UnitOfWorkFactory) Create(ctx context.Context) infrastructure.UnitOfWork {
 	return f.CreateWithIsolationLevel(ctx, defaultIsoLevel)
 }
 
-func (f *Factory) CreateWithIsolationLevel(ctx context.Context, txIsoLevel pgx.TxIsoLevel) (contracts.UnitOfWork, error) {
+func (f *UnitOfWorkFactory) CreateWithIsolationLevel(ctx context.Context, txIsoLevel pgx.TxIsoLevel) infrastructure.UnitOfWork {
 	conn, err := f.pool.Acquire(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create unit of work: %w", err)
+		err = fmt.Errorf("failed to create unit of work: %w", err)
+		panic(err)
 	}
 
-	return newUnitOfWorkWithIsoLevel(conn, f.logger, txIsoLevel), nil
+	return newUnitOfWorkWithIsoLevel(conn, f.logger, txIsoLevel)
 }

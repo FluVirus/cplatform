@@ -5,8 +5,9 @@ import (
 	"cplatform/internal/domain"
 	"errors"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"log/slog"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type Cache struct {
