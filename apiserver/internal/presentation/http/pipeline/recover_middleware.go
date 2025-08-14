@@ -23,11 +23,11 @@ func (m *RecoverMiddleware) Middleware(next http.Handler) http.Handler {
 		defer func() {
 			if err := recover(); err != nil {
 				m.logger.Error("panic recovered", slogext.Reason(err), slogext.Trace())
-			}
 
-			werr := presentation_http.WriteErrors(w, http.StatusInternalServerError, presentation.ErrUnknown)
-			if werr != nil {
-				m.logger.Warn("cannot write panic recovered errors", slogext.Cause(werr))
+				werr := presentation_http.WriteErrors(w, http.StatusInternalServerError, presentation.ErrUnknown)
+				if werr != nil {
+					m.logger.Warn("cannot write panic recovered errors", slogext.Cause(werr))
+				}
 			}
 		}()
 
