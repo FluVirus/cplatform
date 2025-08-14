@@ -13,7 +13,7 @@ type UserDto struct {
 	Salt         []byte `redis:"salt"`
 }
 
-func (u *UserDto) MarshalBinary() ([]byte, error) {
+func (u UserDto) MarshalBinary() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	if err := binary.Write(buf, binary.BigEndian, u.Id); err != nil {
